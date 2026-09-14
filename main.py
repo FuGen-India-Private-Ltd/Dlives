@@ -236,11 +236,15 @@ class TelemetryWorkerThread(QThread):
             except Exception as e:
                 print(f"[Telemetry Worker Exception]: {e}")
 
-            self.msleep(self.interval_ms)
+            for _ in range(max(1, int(self.interval_ms / 50))):
+                if not self.is_running:
+                    break
+                self.msleep(50)
 
     def stop(self):
         self.is_running = False
-        self.wait(1000)
+        self.quit()
+        self.wait(150)
 
 
 class GlobalDropOverlay(QFrame):
@@ -438,6 +442,12 @@ class DynamicIsland(QWidget):
                 self.telemetry_thread.stop()
             if hasattr(self, 'priority_notif_thread') and self.priority_notif_thread and self.priority_notif_thread.isRunning():
                 self.priority_notif_thread.stop()
+            if hasattr(self, 'now_playing_thread') and self.now_playing_thread and self.now_playing_thread.isRunning():
+                self.now_playing_thread.stop()
+            for timer_attr in ('clock_timer', 'safety_net_timer', 'window_watchdog_timer', 'hover_timer', 'leave_timer', 'alarm_sound_timer', 'auto_dismiss_timer'):
+                timer = getattr(self, timer_attr, None)
+                if timer and hasattr(timer, 'stop'):
+                    timer.stop()
         except Exception:
             pass
         super().closeEvent(event)
@@ -577,6 +587,7 @@ class DynamicIsland(QWidget):
         self._right_drag_start_cursor = None
         self._right_drag_click_offset = None
         self._right_drag_distance = 0
+        self._last_drag_finish_time = 0.0
 
         # Container Frame
         self.container_frame = ContainerFrame()
@@ -641,13 +652,20 @@ class DynamicIsland(QWidget):
         self.dash_brand_lbl.setStyleSheet("color: #38bdf8; font-size: 10px; font-weight: 900; letter-spacing: 0.5px; background: transparent;")
 
         self.btn_min_to_tray = QPushButton("🗕 Minimize")
-        self.btn_min_to_tray.setToolTip("Minimize Dynamic Island to Windows Taskbar / System Tray")
+        self.btn_min_to_tray.setToolTip("Minimize Dynamic Island to System Tray")
         self.btn_min_to_tray.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_min_to_tray.setFixedHeight(22)
         self.btn_min_to_tray.setObjectName("btn_min_to_tray")
         self.btn_min_to_tray.clicked.connect(self.minimize_to_tray)
 
-        self.btn_open_full_app = QPushButton("🖥️ Expand Workspace \u2197")
+        self.btn_close_app = QPushButton("✕ Close")
+        self.btn_close_app.setToolTip("Close Dlives Application")
+        self.btn_close_app.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_close_app.setFixedHeight(22)
+        self.btn_close_app.setObjectName("btn_close_app")
+        self.btn_close_app.clicked.connect(QApplication.instance().quit)
+
+        self.btn_open_full_app = QPushButton("🖥️ Expand Workspace ↗")
         self.btn_open_full_app.setToolTip("Open Full Workspace Studio Window")
         self.btn_open_full_app.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_open_full_app.setFixedHeight(22)
@@ -658,6 +676,7 @@ class DynamicIsland(QWidget):
         dash_header_box.addWidget(self.dash_brand_lbl)
         dash_header_box.addStretch()
         dash_header_box.addWidget(self.btn_min_to_tray)
+        dash_header_box.addWidget(self.btn_close_app)
         dash_header_box.addWidget(self.btn_open_full_app)
         dashboard_layout.addLayout(dash_header_box)
 
@@ -691,7 +710,7 @@ class DynamicIsland(QWidget):
         self.tab_settings = SettingsTabWidget(self.settings)
         self.tab_settings.open_full_window_requested.connect(lambda: self.open_full_app_window(0))
         self.tab_notifications = NotificationsTabWidget(self.settings)
-        self.tab_notifications.open_notification_requested.connect(lambda _: self.expand_dashboard())
+        self.tab_notifications.open_notification_requested.connect(lambda _: self.expand_island())
         self.tab_home.pomo_tick_relayed.connect(self.pill_widget.update_pomodoro_badge)
 
         self.all_tabs_map = {
@@ -819,6 +838,25 @@ class DynamicIsland(QWidget):
                     background-color: {accent_color};
                     color: #ffffff;
                     border: 1px solid {accent_color};
+                }}
+            """)
+        if hasattr(self, 'btn_close_app'):
+            cls_bg = "rgba(255, 255, 255, 0.08)" if mode == "dark" else "rgba(0, 0, 0, 0.06)"
+            cls_border = "rgba(255, 255, 255, 0.16)" if mode == "dark" else "rgba(0, 0, 0, 0.14)"
+            self.btn_close_app.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: {cls_bg};
+                    color: {pal.get('text_secondary', '#cbd5e1')};
+                    border: 1px solid {cls_border};
+                    border-radius: 5px;
+                    font-size: 9.5px;
+                    font-weight: 700;
+                    padding: 0 8px;
+                }}
+                QPushButton:hover {{
+                    background-color: #ef4444;
+                    color: #ffffff;
+                    border: 1px solid #ef4444;
                 }}
             """)
         if hasattr(self, 'btn_open_full_app'):
@@ -998,18 +1036,17 @@ class DynamicIsland(QWidget):
                 print(f"Error reloading alarms/timetable on tab switch: {e}")
 
     def update_window_position(self, frame_w: int, frame_h: int):
-        if not hasattr(self, '_cached_screen_geo') or self._cached_screen_geo is None:
-            screens = QApplication.screens()
-            mon_idx = int(self.settings.get("monitor_index", 0))
-            if 0 <= mon_idx < len(screens):
-                screen = screens[mon_idx]
-            else:
-                screen = QApplication.primaryScreen()
-            if not screen:
-                return
-            self._cached_screen_geo = screen.availableGeometry()
+        screens = QApplication.screens()
+        mon_idx = int(self.settings.get("monitor_index", 0))
+        if 0 <= mon_idx < len(screens):
+            screen = screens[mon_idx]
+        else:
+            screen = QApplication.primaryScreen()
+        if not screen:
+            return
+        geo = screen.availableGeometry()
+        self._cached_screen_geo = geo
         
-        geo = self._cached_screen_geo
         pos_setting = self.settings.get("position", "top_center")
         offset_x = int(self.settings.get("offset_x", 0))
         offset_y = int(self.settings.get("offset_y", 12))
@@ -1080,7 +1117,7 @@ class DynamicIsland(QWidget):
             event.acceptProposedAction()
 
     def enterEvent(self, event):
-        if getattr(self, '_right_drag_active', False):
+        if getattr(self, '_right_drag_active', False) or (time.time() - getattr(self, '_last_drag_finish_time', 0.0) < 0.6):
             return
         self.mouse_outside_since = None
         self.leave_timer.stop()
@@ -1094,7 +1131,17 @@ class DynamicIsland(QWidget):
     def get_stable_target_expanded_rect(self):
         """Returns the STABLE, non-shifting target expanded window bounding box with a tight 8px hover buffer."""
         from PyQt6.QtCore import QRect
-        screen = QApplication.primaryScreen()
+        buffer = 8
+        card_w = self.expanded_width + (buffer * 2)
+        card_h = self.expanded_height + (buffer * 2)
+
+        # If already expanded and dashboard is live on screen, use its direct position
+        if self.is_expanded and hasattr(self, 'dashboard_widget') and self.dashboard_widget.isVisible():
+            return QRect(self.x() + self.margin - buffer, self.y() + self.margin - buffer, card_w, card_h)
+
+        screens = QApplication.screens()
+        mon_idx = int(self.settings.get("monitor_index", 0))
+        screen = screens[mon_idx] if (0 <= mon_idx < len(screens)) else QApplication.primaryScreen()
         if not screen:
             return self.frameGeometry()
 
@@ -1103,31 +1150,34 @@ class DynamicIsland(QWidget):
         offset_x = int(self.settings.get("offset_x", 0))
         offset_y = int(self.settings.get("offset_y", 12))
 
-        # Tight responsive bounding box: visible card dimensions + 8px hover buffer
-        buffer = 8
-        card_w = self.expanded_width + (buffer * 2)
-        card_h = self.expanded_height + (buffer * 2)
-
-        win_w = self.expanded_width + (self.margin * 2)
-        win_h = self.expanded_height + (self.margin * 2)
+        win_w = int(round(self.expanded_width + (self.margin * 2)))
+        win_h = int(round(self.expanded_height + (self.margin * 2)))
 
         if pos_setting == "top_left":
-            x = geo.x() + offset_x + self.margin - buffer
-            y = geo.y() + offset_y + self.margin - buffer
+            x = int(round(geo.x() + offset_x))
+            y = int(round(geo.y() + offset_y))
         elif pos_setting == "top_right":
-            x = geo.x() + geo.width() - win_w - offset_x + self.margin - buffer
-            y = geo.y() + offset_y + self.margin - buffer
+            x = int(round(geo.x() + geo.width() - win_w - offset_x))
+            y = int(round(geo.y() + offset_y))
         elif pos_setting == "bottom_center":
-            x = geo.x() + ((geo.width() - win_w) // 2) + offset_x + self.margin - buffer
-            y = geo.y() + geo.height() - win_h - offset_y + self.margin - buffer
+            x = int(round(geo.x() + ((geo.width() - win_w) / 2.0) + offset_x))
+            y = int(round(geo.y() + geo.height() - win_h - offset_y))
         else:  # top_center
-            x = geo.x() + ((geo.width() - win_w) // 2) + offset_x + self.margin - buffer
-            y = geo.y() + offset_y + self.margin - buffer
+            x = int(round(geo.x() + ((geo.width() - win_w) / 2.0) + offset_x))
+            y = int(round(geo.y() + offset_y))
 
-        return QRect(x, y, card_w, card_h)
+        # Strict screen boundary clamping matching update_window_position
+        min_x = geo.x()
+        max_x = max(min_x, geo.x() + geo.width() - win_w)
+        min_y = geo.y()
+        max_y = max(min_y, geo.y() + geo.height() - win_h)
+        x = max(min_x, min(x, max_x))
+        y = max(min_y, min(y, max_y))
+
+        return QRect(x + self.margin - buffer, y + self.margin - buffer, card_w, card_h)
 
     def leaveEvent(self, event):
-        if getattr(self, '_right_drag_active', False):
+        if getattr(self, '_right_drag_active', False) or (time.time() - getattr(self, '_last_drag_finish_time', 0.0) < 0.6):
             return
         if self.is_alarm_alert_active:
             print("[Collapse Check]: Leave event ignored because alarm takeover is active.", flush=True)
@@ -1188,8 +1238,13 @@ class DynamicIsland(QWidget):
                     except Exception:
                         pass
                     self.setCursor(Qt.CursorShape.ArrowCursor)
+                    self._last_drag_finish_time = time.time()
                     if getattr(self, '_right_drag_distance', 0) > 4:
-                        self._save_dragged_position()
+                        curr_cursor = QCursor.pos()
+                        target_pos = self.pos()
+                        if self._right_drag_click_offset is not None:
+                            target_pos = curr_cursor - self._right_drag_click_offset
+                        self._save_dragged_position(target_pos)
                     return True
 
                 curr_cursor = QCursor.pos()
@@ -1220,14 +1275,17 @@ class DynamicIsland(QWidget):
                 self.setCursor(Qt.CursorShape.ArrowCursor)
 
                 curr_cursor = QCursor.pos()
+                target_pos = self.pos()
                 if self._right_drag_click_offset is not None:
                     target_pos = curr_cursor - self._right_drag_click_offset
                     # Synchronize Qt internal geometry cache with final window location
                     self.move(target_pos)
                     self.enforce_win32_tool_topmost()
 
+                self._last_drag_finish_time = time.time()
+
                 if getattr(self, '_right_drag_distance', 0) > 4:
-                    self._save_dragged_position()
+                    self._save_dragged_position(target_pos)
                     return True
                 else:
                     # Minor right click without dragging: show context menu
@@ -1257,20 +1315,31 @@ class DynamicIsland(QWidget):
                         return True
         return super().eventFilter(watched, event)
 
-    def _save_dragged_position(self):
+    def _save_dragged_position(self, explicit_target_pos=None):
         """Converts dragged screen coordinates to relative monitor offsets and persists them live."""
         try:
             screens = QApplication.screens()
-            mon_idx = int(self.settings.get("monitor_index", 0))
-            screen = screens[mon_idx] if (0 <= mon_idx < len(screens)) else QApplication.primaryScreen()
+            win_w = self.width()
+            win_h = self.height()
+
+            if explicit_target_pos is not None:
+                current_x = explicit_target_pos.x()
+                current_y = explicit_target_pos.y()
+            else:
+                current_x = self.x()
+                current_y = self.y()
+
+            window_center = QPoint(int(current_x + (win_w / 2.0)), int(current_y + (win_h / 2.0)))
+            target_mon_idx = 0
+            for i, sc in enumerate(screens):
+                if sc.geometry().contains(window_center):
+                    target_mon_idx = i
+                    break
+            screen = screens[target_mon_idx] if (0 <= target_mon_idx < len(screens)) else QApplication.primaryScreen()
             if not screen:
                 return
             geo = screen.availableGeometry()
             pos_setting = self.settings.get("position", "top_center")
-            win_w = self.width()
-            win_h = self.height()
-            current_x = self.x()
-            current_y = self.y()
 
             if pos_setting in ("top_center", "bottom_center"):
                 center_island_x = current_x + (win_w / 2.0)
@@ -1288,11 +1357,24 @@ class DynamicIsland(QWidget):
             else:
                 offset_y = current_y - geo.y()
 
-            self._cached_screen_geo = None
-            self.settings.update_settings({"offset_x": int(round(offset_x)), "offset_y": int(round(offset_y))})
-            print(f"[Island Repositioned]: offset_x={int(round(offset_x))}, offset_y={int(round(offset_y))} saved live to preferences.", flush=True)
+            self._cached_screen_geo = geo
+            self.settings.update_settings({
+                "monitor_index": target_mon_idx,
+                "offset_x": int(round(offset_x)),
+                "offset_y": int(round(offset_y))
+            })
+            print(f"[Island Repositioned]: monitor={target_mon_idx}, offset_x={int(round(offset_x))}, offset_y={int(round(offset_y))} saved live.", flush=True)
+
+            # Re-snap to solid clamped coordinates cleanly
+            self.update_window_position(self.current_frame_width, self.current_frame_height)
         except Exception as e:
             print(f"[Save Dragged Position Error]: {e}", flush=True)
+
+    def _apply_custom_position(self):
+        """Re-applies custom or dragged position to the window based on current expanded/collapsed dimensions."""
+        curr_w = self.expanded_width if self.is_expanded else self.collapsed_width
+        curr_h = self.expanded_height if self.is_expanded else self.collapsed_height
+        self.update_window_position(curr_w, curr_h)
 
     def show_island_context_menu(self, global_pt: QPoint):
         try:
@@ -1318,7 +1400,9 @@ class DynamicIsland(QWidget):
         return False
 
     def on_hover_timer_timeout(self):
-        if not self.is_expanded and not getattr(self, '_right_drag_active', False):
+        if getattr(self, '_right_drag_active', False) or (time.time() - getattr(self, '_last_drag_finish_time', 0.0) < 0.6):
+            return
+        if not self.is_expanded:
             if not self.is_alarm_alert_active and QApplication.activeModalWidget() is None:
                 if self.frameGeometry().contains(QCursor.pos()):
                     self.expand_island()
@@ -1385,7 +1469,7 @@ class DynamicIsland(QWidget):
 
     def check_force_collapse_safety(self):
         """High-frequency mouse position tracker for both smooth hover-dwell expansion and stable collapse safety."""
-        if getattr(self, '_right_drag_active', False):
+        if getattr(self, '_right_drag_active', False) or (time.time() - getattr(self, '_last_drag_finish_time', 0.0) < 0.6):
             return
         cursor_pos = QCursor.pos()
 
@@ -1492,30 +1576,21 @@ class DynamicIsland(QWidget):
             self.expand_island()
 
     def minimize_to_tray(self):
-        """Minimizes the Dynamic Island to the Windows Taskbar among running applications."""
+        """Minimizes the Dynamic Island to the system tray completely without leaving any frozen window on screen."""
         self._minimized_to_tray = True
         self._last_restore_pos = self.pos()
         self.leave_timer.stop()
         self.hover_timer.stop()
 
-        # Temporarily clear Tool & WindowStaysOnTopHint flags so Windows Taskbar gets a genuine, clickable taskbar entry
-        self.setWindowFlags(Qt.WindowType.FramelessWindowHint)
-        self.setWindowTitle("Dlives")
-        icon_path = os.path.join(os.path.dirname(__file__), "assets", "dlives_logo.png")
-        if not os.path.exists(icon_path):
-            icon_path = os.path.join(os.path.dirname(__file__), "assets", "san_lives_logo.png")
-        if not os.path.exists(icon_path):
-            icon_path = os.path.join(os.path.dirname(__file__), "app_icon.png")
-        if os.path.exists(icon_path):
-            self.setWindowIcon(QIcon(icon_path))
+        if self.is_expanded:
+            self.perform_soft_collapse()
 
-        self.set_taskbar_visibility(True)
-        self.showMinimized()
+        self.hide()
         try:
             if hasattr(self, 'tray_icon') and self.tray_icon.isVisible():
                 self.tray_icon.showMessage(
                     "Dlives Dynamic Island",
-                    "Island minimized. Click the taskbar icon, tray icon, or press F10 to restore.",
+                    "Island minimized to tray. Click the tray icon or press F10 to restore.",
                     QSystemTrayIcon.MessageIcon.Information,
                     2000
                 )
@@ -1523,9 +1598,10 @@ class DynamicIsland(QWidget):
             pass
 
     def restore_from_tray(self):
-        """Restores the Dynamic Island back to its exact coordinate position and hides it from the taskbar into background mode."""
+        """Restores the Dynamic Island back to its exact coordinate position in background mode."""
         self._minimized_to_tray = False
         self.apply_island_window_flags()
+        self.show()
         self.showNormal()
         self.raise_()
         self.activateWindow()
@@ -1540,9 +1616,29 @@ class DynamicIsland(QWidget):
         else:
             self.update_window_position(curr_w, curr_h)
 
-        # Return to clean background mode: remove from Windows Taskbar and firmly lock position
         QTimer.singleShot(50, lambda: self.enforce_win32_tool_topmost())
         QTimer.singleShot(150, lambda: self.enforce_win32_tool_topmost())
+
+    # Convenience API Aliases
+    def collapse_island(self):
+        self.perform_soft_collapse()
+
+    def minimize_island(self):
+        self.minimize_to_tray()
+
+    def restore_from_minimized(self):
+        self.restore_from_tray()
+
+    def show_notification_banner(self, notif_data: dict):
+        self.trigger_notification_popup(notif_data)
+
+    def on_screenshot_received(self):
+        if hasattr(self, 'pill_widget') and self.pill_widget:
+            self.pill_widget.show_temp_status("📸 Screenshot saved to Shelf!")
+
+    @property
+    def is_minimized(self) -> bool:
+        return getattr(self, '_minimized_to_tray', False) or self.isMinimized()
 
     def init_system_tray(self):
         if not QSystemTrayIcon.isSystemTrayAvailable():
@@ -1814,14 +1910,12 @@ class DynamicIsland(QWidget):
         battery = data.get('battery', {})
         charging = data.get('charging', False)
 
-        # Isolated Update 1: Collapsed Pill Battery & Mute/Volume Display
+        # Isolated Update 1: Collapsed Pill Battery Display
         try:
             if hasattr(self, 'pill_widget'):
                 self.pill_widget.update_battery_display(battery, charging)
-                is_muted = data.get('is_muted', False) or (volume <= 0)
-                self.pill_widget.update_volume_and_mute(volume, is_muted)
         except Exception as e:
-            print(f"[Telemetry UI Error - Pill Battery/Mute]: {e}")
+            print(f"[Telemetry UI Error - Pill Battery]: {e}")
 
         # Isolated Update 2: Control Center Tab Live Sliders & Metrics
         try:
@@ -2027,11 +2121,13 @@ class DynamicIsland(QWidget):
                         return
 
     def play_continuous_sound_step(self, sound_path: str = None):
+        target_path = sound_path or getattr(self, '_current_alarm_sound_path', None)
         def async_sound():
-            SystemMonitor.play_alarm_sound_effect(sound_path)
+            SystemMonitor.play_alarm_sound_effect(target_path)
         threading.Thread(target=async_sound, daemon=True).start()
 
     def start_continuous_alarm_sound(self, sound_path: str = None):
+        self._current_alarm_sound_path = sound_path
         if sound_path and os.path.exists(sound_path) and self.media_player:
             try:
                 self.media_player.stop()
@@ -2287,7 +2383,11 @@ class DynamicIsland(QWidget):
     def on_notification_popup_open(self, notif_data: dict):
         self.dismiss_notification_popup()
         self.expand_island()
-        self.switch_tab(9)  # Switch to Notifications Tab
+        if hasattr(self, 'active_tab_keys') and "notifs" in self.active_tab_keys:
+            notif_idx = self.active_tab_keys.index("notifs")
+            self.switch_tab(notif_idx)
+        else:
+            self.switch_tab(0)
 
     def check_incoming_priority_notifications(self):
         if not self.settings.get("notification_popup_enabled", True):
@@ -2395,6 +2495,8 @@ class ScreenshotAndClipboardMonitor(QObject):
             if ptr is None:
                 return
             try:
+                if hasattr(ptr, 'setsize'):
+                    ptr.setsize(qimage.sizeInBytes())
                 sample_bytes = bytes(ptr[:min(qimage.sizeInBytes(), 65536)])
             except Exception:
                 sample_bytes = f"{qimage.width()}_{qimage.height()}_{qimage.depth()}_{qimage.sizeInBytes()}".encode()

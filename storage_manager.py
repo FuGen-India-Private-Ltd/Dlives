@@ -96,7 +96,7 @@ def safe_atomic_write_json(file_path: str, data):
         os.makedirs(dir_name, exist_ok=True)
         temp_name = None
         try:
-            with tempfile.NamedTemporaryFile('w', dir=dir_name, delete=False, encoding='utf-8') as tf:
+            with tempfile.NamedTemporaryFile('w', dir=dir_name, prefix='tmp_', suffix='.tmp', delete=False, encoding='utf-8') as tf:
                 json.dump(data, tf, indent=2, ensure_ascii=False)
                 temp_name = tf.name
 
@@ -126,7 +126,7 @@ def safe_atomic_write_text(file_path: str, text: str):
         dir_name = os.path.dirname(file_path)
         temp_name = None
         try:
-            with tempfile.NamedTemporaryFile('w', dir=dir_name, delete=False, encoding='utf-8') as tf:
+            with tempfile.NamedTemporaryFile('w', dir=dir_name, prefix='tmp_', suffix='.tmp', delete=False, encoding='utf-8') as tf:
                 tf.write(text)
                 temp_name = tf.name
 
@@ -248,7 +248,7 @@ class StorageManager(QObject):
             # 2. Detect external additions (new .txt files dropped into notes_dir)
             try:
                 for fname in os.listdir(self.notes_dir):
-                    if fname.endswith(".txt") and fname not in known_filenames:
+                    if fname.endswith(".txt") and not fname.startswith(("tmp", ".", "~")) and fname not in known_filenames:
                         fpath = os.path.join(self.notes_dir, fname)
                         if os.path.isfile(fpath):
                             # Extract title from first non-empty line or clean filename
@@ -363,6 +363,14 @@ class StorageManager(QObject):
             for ep in edge_paths:
                 if os.path.exists(ep):
                     return ep
+        if "chrome" in lower_cmd:
+            chrome_paths = [
+                r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+                r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe"
+            ]
+            for cp in chrome_paths:
+                if os.path.exists(cp):
+                    return cp
         if lower_cmd == "explorer":
             return r"C:\Windows\explorer.exe"
         if lower_cmd == "notepad":
@@ -387,6 +395,27 @@ class StorageManager(QObject):
         which_path = shutil.which(cmd_clean)
         if which_path and os.path.exists(which_path):
             return which_path
+
+        # Registry App Paths Lookup
+        try:
+            import winreg
+            target_key = cmd_clean if cmd_clean.lower().endswith(".exe") else f"{cmd_clean}.exe"
+            reg_roots = [
+                (winreg.HKEY_CURRENT_USER, r"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths"),
+                (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths")
+            ]
+            for hkey, subkey in reg_roots:
+                try:
+                    with winreg.OpenKey(hkey, f"{subkey}\\{target_key}") as app_key:
+                        exe_path, _ = winreg.QueryValueEx(app_key, "")
+                        if exe_path:
+                            exe_path = exe_path.strip().strip('"')
+                            if os.path.exists(exe_path):
+                                return exe_path
+                except Exception:
+                    pass
+        except Exception:
+            pass
 
         return ""
 
@@ -423,28 +452,39 @@ class StorageManager(QObject):
     def load_app_launcher(self) -> list:
         apps = self.load_apps()
         if not apps:
-            apps = [
+            candidate_defaults = [
                 {"id": "app_browser", "name": "Browser", "icon": "🌐", "command": "start msedge"},
                 {"id": "app_explorer", "name": "Explorer", "icon": "📁", "command": "explorer"},
                 {"id": "app_terminal", "name": "Terminal", "icon": "💻", "command": "start wt || start cmd"},
                 {"id": "app_notepad", "name": "Notepad", "icon": "📝", "command": "notepad"}
             ]
-            self.save_apps(apps)
+            apps = []
+            for cd in candidate_defaults:
+                if self.resolve_exe_path(cd["command"]):
+                    apps.append(cd)
+            if apps:
+                self.save_apps(apps)
 
-        # Auto-extract & cache icons for apps missing cached icon files
+        # Filter out non-existent apps and auto-extract icons
+        valid_apps = []
         changed = False
         for app in apps:
             app_id = app.get("id", "")
             cmd = app.get("command", "")
+            resolved = self.resolve_exe_path(cmd)
+            if not resolved:
+                changed = True
+                continue
             cur_icon_path = app.get("icon_path", "")
             if not cur_icon_path or not os.path.exists(cur_icon_path):
                 cached = self.extract_and_cache_app_icon(cmd, app_id)
                 if cached:
                     app["icon_path"] = cached
                     changed = True
+            valid_apps.append(app)
         if changed:
-            self.save_apps(apps)
-        return apps
+            self.save_apps(valid_apps)
+        return valid_apps
 
     def save_app_launcher(self, apps: list):
         self.save_apps(apps)
@@ -521,29 +561,33 @@ class StorageManager(QObject):
 
     def save_notes_index(self, index: list):
         with self._lock:
-            old_index = []
-            if os.path.exists(self.notes_index_file):
-                try:
-                    with open(self.notes_index_file, "r", encoding="utf-8") as f:
-                        data = json.load(f)
-                        if isinstance(data, list):
-                            old_index = data
-                except Exception:
-                    old_index = []
+            self._watcher_blocked = True
+            try:
+                old_index = []
+                if os.path.exists(self.notes_index_file):
+                    try:
+                        with open(self.notes_index_file, "r", encoding="utf-8") as f:
+                            data = json.load(f)
+                            if isinstance(data, list):
+                                old_index = data
+                    except Exception:
+                        old_index = []
 
-            old_home_pins = [(n.get("id"), n.get("title")) for n in old_index if n.get("is_pinned_home", False)]
-            new_home_pins = [(n.get("id"), n.get("title")) for n in index if n.get("is_pinned_home", False)]
-            old_pinned = [n.get("id") for n in old_index if n.get("is_pinned", False)]
-            new_pinned = [n.get("id") for n in index if n.get("is_pinned", False)]
-            old_ids = [n.get("id") for n in old_index]
-            new_ids = [n.get("id") for n in index]
+                old_home_pins = [(n.get("id"), n.get("title")) for n in old_index if n.get("is_pinned_home", False)]
+                new_home_pins = [(n.get("id"), n.get("title")) for n in index if n.get("is_pinned_home", False)]
+                old_pinned = [n.get("id") for n in old_index if n.get("is_pinned", False)]
+                new_pinned = [n.get("id") for n in index if n.get("is_pinned", False)]
+                old_ids = [n.get("id") for n in old_index]
+                new_ids = [n.get("id") for n in index]
 
-            safe_atomic_write_json(self.notes_index_file, index)
+                safe_atomic_write_json(self.notes_index_file, index)
 
-            if old_home_pins != new_home_pins or old_ids != new_ids:
-                self.home_pins_changed.emit()
-            if old_pinned != new_pinned or old_ids != new_ids:
-                self.notes_index_changed.emit()
+                if old_home_pins != new_home_pins or old_ids != new_ids:
+                    self.home_pins_changed.emit()
+                if old_pinned != new_pinned or old_ids != new_ids:
+                    self.notes_index_changed.emit()
+            finally:
+                self._watcher_blocked = False
 
     def queue_note_save(self, filename: str, content: str):
         """Buffers note edits in memory without disk I/O on keystrokes."""
@@ -561,30 +605,34 @@ class StorageManager(QObject):
             if not self._dirty_note_buffers:
                 return
 
-            dirty_items = list(self._dirty_note_buffers.items())
-            self._dirty_note_buffers.clear()
+            self._watcher_blocked = True
+            try:
+                dirty_items = list(self._dirty_note_buffers.items())
+                self._dirty_note_buffers.clear()
 
-            os.makedirs(self.notes_dir, exist_ok=True)
-            index = self.load_notes_index()
-            index_updated = False
-            now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
+                os.makedirs(self.notes_dir, exist_ok=True)
+                index = self.load_notes_index()
+                index_updated = False
+                now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
 
-            for filename, content in dirty_items:
-                try:
-                    filepath = os.path.join(self.notes_dir, filename)
-                    safe_atomic_write_text(filepath, content)
+                for filename, content in dirty_items:
+                    try:
+                        filepath = os.path.join(self.notes_dir, filename)
+                        safe_atomic_write_text(filepath, content)
 
-                    # Update index metadata timestamp
-                    for item in index:
-                        if item.get("filename") == filename:
-                            item["updated_at"] = now_str
-                            index_updated = True
-                            break
-                except Exception as e:
-                    print(f"Error flushing note {filename}: {e}")
+                        # Update index metadata timestamp
+                        for item in index:
+                            if item.get("filename") == filename:
+                                item["updated_at"] = now_str
+                                index_updated = True
+                                break
+                    except Exception as e:
+                        print(f"Error flushing note {filename}: {e}")
 
-            if index_updated:
-                self.save_notes_index(index)
+                if index_updated:
+                    self.save_notes_index(index)
+            finally:
+                self._watcher_blocked = False
 
     def load_note_content(self, filename: str) -> str:
         with self._lock:
@@ -656,28 +704,40 @@ class StorageManager(QObject):
 
     def create_note(self, title: str = "New Note") -> dict:
         with self._lock:
-            now = datetime.now()
-            timestamp_str = now.strftime("%Y%m%d_%H%M%S")
-            sanitized_title = sanitize_filename(title, "New_Note")
-            filename = f"{timestamp_str}_{sanitized_title}.txt"
-            import uuid
-            note_id = f"note_{int(now.timestamp()*1000)}_{uuid.uuid4().hex[:6]}"
+            self._watcher_blocked = True
+            try:
+                now = datetime.now()
+                timestamp_str = now.strftime("%Y%m%d_%H%M%S")
+                sanitized_title = sanitize_filename(title, "New_Note")
+                import uuid
+                u_suffix = uuid.uuid4().hex[:6]
+                filename = f"{timestamp_str}_{sanitized_title}_{u_suffix}.txt"
+                note_id = f"note_{int(now.timestamp()*1000)}_{u_suffix}"
 
-            note = {
-                "id": note_id,
-                "title": (title.strip() or "New Note")[:120],
-                "filename": filename,
-                "created_at": now.strftime("%Y-%m-%d %H:%M"),
-                "updated_at": now.strftime("%Y-%m-%d %H:%M"),
-                "is_pinned": False,
-                "is_pinned_home": False
-            }
+                note = {
+                    "id": note_id,
+                    "title": (title.strip() or "New Note")[:120],
+                    "filename": filename,
+                    "created_at": now.strftime("%Y-%m-%d %H:%M"),
+                    "updated_at": now.strftime("%Y-%m-%d %H:%M"),
+                    "is_pinned": False,
+                    "is_pinned_home": False
+                }
 
-            self.save_note_content(filename, "", immediate=True)
-            index = self.load_notes_index()
-            index.insert(0, note)
-            self.save_notes_index(index)
-            return note
+                filepath = os.path.join(self.notes_dir, filename)
+                safe_atomic_write_text(filepath, "")
+                self._note_cache[filename] = ""
+                index = self.load_notes_index()
+                index.insert(0, note)
+                self.save_notes_index(index)
+                try:
+                    if os.path.exists(filepath):
+                        self.notes_watcher.addPath(filepath)
+                except Exception:
+                    pass
+                return note
+            finally:
+                self._watcher_blocked = False
 
     def delete_note(self, note_id: str):
         with self._lock:
@@ -892,6 +952,85 @@ class StorageManager(QObject):
         with self._lock:
             safe_atomic_write_json(self.alarms_file, alarms)
         self.alarms_changed.emit()
+
+    def get_all_alarms(self) -> list:
+        return self.load_alarms()
+
+    def add_alarm(self, time_str: str, label: str = "", days: list = None, sound: str = None, is_snooze: bool = False, expires_at: str = None) -> str:
+        with self._lock:
+            alarms = self.load_alarms()
+            aid = f"alarm_{int(datetime.now().timestamp()*1000)}" if not is_snooze else f"snooze_{int(datetime.now().timestamp()*1000)}"
+            new_alarm = {
+                "id": aid,
+                "time": time_str,
+                "label": label or "Alarm",
+                "days": days or [],
+                "sound": sound or "default_alarm",
+                "enabled": True,
+                "is_snooze": is_snooze
+            }
+            if expires_at:
+                new_alarm["expires_at"] = expires_at
+            alarms.append(new_alarm)
+            self.save_alarms(alarms)
+            return aid
+
+    def delete_alarm(self, alarm_id: str) -> bool:
+        with self._lock:
+            alarms = self.load_alarms()
+            filtered = [a for a in alarms if a.get("id") != alarm_id]
+            if len(filtered) != len(alarms):
+                self.save_alarms(filtered)
+                return True
+            return False
+
+    # Convenience aliases for notes, clipboard, and tasks
+    def get_all_notes(self) -> list:
+        return self.load_notes_index()
+
+    def save_note(self, title: str = "New Note", content: str = "", tags: list = None) -> str:
+        with self._lock:
+            self._watcher_blocked = True
+            try:
+                note = self.create_note(title=title)
+                if content:
+                    self.save_note_content(note["filename"], content, immediate=True)
+                return note.get("id", "")
+            finally:
+                self._watcher_blocked = False
+
+    def add_clipboard_item(self, text: str, item_type: str = "text"):
+        self.add_clipboard_entry(text)
+
+    def get_clipboard_history(self, limit: int = 50) -> list:
+        history = self.load_clipboard()
+        return history[:limit] if limit else history
+
+    def get_all_todos(self) -> list:
+        return self.load_timetable()
+
+    def add_todo(self, text: str, priority: str = "Normal", due_date: str = None) -> str:
+        with self._lock:
+            tt = self.load_timetable()
+            tid = f"task_{int(datetime.now().timestamp()*1000)}"
+            tt.append({
+                "id": tid,
+                "title": text,
+                "time": due_date or datetime.now().strftime("%H:%M"),
+                "priority": priority,
+                "is_completed": False,
+                "completed": False
+            })
+            self.save_timetable(tt)
+            return tid
+
+    def toggle_todo(self, todo_id: str, completed: bool = None) -> bool:
+        self.toggle_timetable_task(todo_id, completed)
+        return True
+
+    def delete_todo(self, todo_id: str) -> bool:
+        self.delete_timetable_task(todo_id)
+        return True
 
     # Timetable Schedule (with automatic expired temporary snooze cleanup)
     def load_timetable(self) -> list:

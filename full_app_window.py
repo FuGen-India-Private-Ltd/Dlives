@@ -869,10 +869,16 @@ class AlarmsNotifsConfigWidget(QWidget):
         act_row = QHBoxLayout()
         act_row.setSpacing(6)
 
+        btn_pick_installed = QPushButton("📱 Pick Installed App")
+        btn_pick_installed.setFixedHeight(24)
+        btn_pick_installed.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_pick_installed.setStyleSheet(f"QPushButton {{ background-color: {accent}; color: #ffffff; border: none; border-radius: 4px; font-size: 9.5px; font-weight: bold; padding: 0 8px; }}")
+        btn_pick_installed.clicked.connect(self.add_installed_app)
+
         btn_add_exe = QPushButton("📁 Browse .exe File")
         btn_add_exe.setFixedHeight(24)
         btn_add_exe.setCursor(Qt.CursorShape.PointingHandCursor)
-        btn_add_exe.setStyleSheet(f"QPushButton {{ background-color: {accent}; color: #ffffff; border: none; border-radius: 4px; font-size: 9.5px; font-weight: bold; padding: 0 8px; }}")
+        btn_add_exe.setStyleSheet(f"QPushButton {{ background-color: {pal['sub_btn_bg']}; color: {pal['sub_btn_text']}; border-radius: 4px; border: 1px solid {pal['sub_btn_border']}; font-size: 9.5px; font-weight: bold; padding: 0 8px; }}")
         btn_add_exe.clicked.connect(self.add_exe_file)
 
         btn_pick_running = QPushButton("⚡ Pick Running App")
@@ -881,6 +887,7 @@ class AlarmsNotifsConfigWidget(QWidget):
         btn_pick_running.setStyleSheet(f"QPushButton {{ background-color: {pal['sub_btn_bg']}; color: {pal['sub_btn_text']}; border-radius: 4px; border: 1px solid {pal['sub_btn_border']}; font-size: 9.5px; font-weight: bold; padding: 0 8px; }}")
         btn_pick_running.clicked.connect(self.add_running_app)
 
+        act_row.addWidget(btn_pick_installed)
         act_row.addWidget(btn_add_exe)
         act_row.addWidget(btn_pick_running)
         act_row.addStretch()
@@ -1021,7 +1028,7 @@ class AlarmsNotifsConfigWidget(QWidget):
         mode = self.settings.get("theme_mode", "dark") if self.settings else "dark"
         pal = THEME_PALETTES.get(mode, THEME_PALETTES["dark"])
 
-        raw_apps = self.settings.get("popup_notification_apps", ["WhatsApp", "Slack", "Microsoft Teams", "Discord", "Telegram", "Mail", "Outlook", "Chrome", "Edge"])
+        raw_apps = self.settings.get("popup_notification_apps", [])
         normalized_apps = []
 
         for item in raw_apps:
@@ -1030,6 +1037,13 @@ class AlarmsNotifsConfigWidget(QWidget):
             elif isinstance(item, str) and item.strip():
                 name = item.strip()
                 normalized_apps.append({"name": name, "exe_path": f"{name.lower()}.exe", "enabled": True})
+
+        if not normalized_apps:
+            empty_lbl = QLabel("No priority notification apps configured. Pick installed apps above.")
+            empty_lbl.setStyleSheet(f"color: {pal['text_secondary']}; font-size: 10px; font-style: italic; padding: 12px; background: transparent;")
+            empty_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.apps_container_layout.addWidget(empty_lbl)
+            return
 
         for idx, app_info in enumerate(normalized_apps):
             app_card = GlassPanel(category_key="settings", corner_radius=6)
@@ -1081,6 +1095,21 @@ class AlarmsNotifsConfigWidget(QWidget):
             raw_apps.pop(index)
             self.settings.update_settings({"popup_notification_apps": raw_apps})
             self.render_priority_apps_list()
+
+    def add_installed_app(self):
+        try:
+            from ui_components import AddAppDialog
+            dlg = AddAppDialog(self)
+            if dlg.exec() == QDialog.DialogCode.Accepted:
+                name = dlg.selected_app_name
+                path = dlg.selected_app_path
+                if name and path:
+                    raw_apps = list(self.settings.get("popup_notification_apps", []))
+                    raw_apps.append({"name": name, "exe_path": path, "enabled": True})
+                    self.settings.update_settings({"popup_notification_apps": raw_apps})
+                    self.render_priority_apps_list()
+        except Exception as e:
+            print(f"[Add Installed App Exception]: {e}")
 
     def add_exe_file(self):
         file_path, _ = QFileDialog.getOpenFileName(
@@ -1885,5 +1914,6 @@ class DlivesFullAppWindow(QMainWindow):
         self._titlebar_drag_pos = None
         super().mouseReleaseEvent(event)
 
-# Backward Compatibility Alias
+# Backward Compatibility Aliases
 SanLivesFullAppWindow = DlivesFullAppWindow
+FullAppWindow = DlivesFullAppWindow

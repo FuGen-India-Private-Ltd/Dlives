@@ -173,9 +173,18 @@ def _run_winrt_in_worker_thread(async_func, timeout_sec=2.0):
         return {"error": str(e)}
 
 
+import threading
+_AUDIO_TLS = threading.local()
+_LAST_KNOWN_MUTE = False
+_LAST_KNOWN_VOLUME = 50
+_LAST_MUTE_SET_TIME = 0.0
+
 def _get_pycaw_volume_interface():
     if not HAS_PYCAW:
         return None
+    iface = getattr(_AUDIO_TLS, 'vol_iface', None)
+    if iface is not None:
+        return iface
     try:
         try:
             from comtypes import CoInitialize
@@ -186,17 +195,150 @@ def _get_pycaw_volume_interface():
         if not devices:
             return None
         if hasattr(devices, 'EndpointVolume'):
-            return devices.EndpointVolume
+            _AUDIO_TLS.vol_iface = devices.EndpointVolume
+            return _AUDIO_TLS.vol_iface
         elif hasattr(devices, 'Activate'):
             interface = devices.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
-            return interface.QueryInterface(IAudioEndpointVolume)
+            vol_iface = interface.QueryInterface(IAudioEndpointVolume)
+            _AUDIO_TLS.vol_iface = vol_iface
+            return _AUDIO_TLS.vol_iface
         return None
     except Exception as e:
-        print(f"[Sound Pycaw Interface Error]: {e}")
         return None
+
+def _get_pycaw_mic_interface():
+    if not HAS_PYCAW:
+        return None
+    iface = getattr(_AUDIO_TLS, 'mic_iface', None)
+    if iface is not None:
+        return iface
+    try:
+        try:
+            from comtypes import CoInitialize
+            CoInitialize()
+        except Exception:
+            pass
+        mic = AudioUtilities.GetMicrophone()
+        if not mic:
+            return None
+        if hasattr(mic, 'EndpointVolume'):
+            _AUDIO_TLS.mic_iface = mic.EndpointVolume
+            return _AUDIO_TLS.mic_iface
+        elif hasattr(mic, 'Activate'):
+            interface = mic.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
+            vol_iface = interface.QueryInterface(IAudioEndpointVolume)
+            _AUDIO_TLS.mic_iface = vol_iface
+            return _AUDIO_TLS.mic_iface
+        return None
+    except Exception:
+        return None
+
 
 
 class SystemMonitor:
+    @staticmethod
+    def is_muted() -> bool:
+        return SystemMonitor.get_master_mute()
+
+    @staticmethod
+    def get_volume() -> int:
+        return SystemMonitor.get_master_volume()
+
+    @staticmethod
+    def set_volume(level: int):
+        SystemMonitor.set_master_volume(level)
+
+    @staticmethod
+    def get_system_stats() -> dict:
+        try:
+            cpu = SystemMonitor.get_cpu_usage()
+            ram = SystemMonitor.get_ram_details()
+            bat = SystemMonitor.get_battery_info()
+            disk = SystemMonitor.get_disk_info()
+            return {
+                "cpu_percent": cpu,
+                "ram_percent": ram.get("percent", 0),
+                "ram_total_gb": ram.get("total_gb", 0),
+                "ram_used_gb": ram.get("used_gb", 0),
+                "battery_percent": bat.get("percent", 100),
+                "battery_charging": bat.get("charging", False),
+                "disk_percent": disk.get("percent", 0),
+                "gpu_percent": 0,
+                "uptime": SystemMonitor.get_uptime_string(),
+                "volume": SystemMonitor.get_master_volume(),
+                "is_muted": SystemMonitor.get_master_mute(),
+                "is_mic_muted": SystemMonitor.is_mic_muted(),
+                "brightness": SystemMonitor.get_brightness()
+            }
+        except Exception:
+            return {
+                "cpu_percent": 0,
+                "ram_percent": 0,
+                "battery_percent": 100,
+                "battery_charging": False,
+                "disk_percent": 0,
+                "gpu_percent": 0,
+                "uptime": "0h 0m",
+                "volume": 50,
+                "is_muted": False,
+                "is_mic_muted": False,
+                "brightness": 100
+            }
+
+    @staticmethod
+    def get_active_window_info() -> dict:
+        try:
+            hwnd = ctypes.windll.user32.GetForegroundWindow()
+            if not hwnd:
+                return {"hwnd": 0, "title": "", "process": ""}
+            length = ctypes.windll.user32.GetWindowTextLengthW(hwnd)
+            buf = ctypes.create_unicode_buffer(length + 1)
+            ctypes.windll.user32.GetWindowTextW(hwnd, buf, length + 1)
+            title = buf.value
+
+            pid = ctypes.c_ulong()
+            ctypes.windll.user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+            proc_name = ""
+            if pid.value:
+                try:
+                    proc = psutil.Process(pid.value)
+                    proc_name = proc.name()
+                except Exception:
+                    pass
+            return {"hwnd": hwnd, "title": title, "process": proc_name}
+        except Exception:
+            return {"hwnd": 0, "title": "", "process": ""}
+
+    @staticmethod
+    def get_installed_apps(force_refresh: bool = False) -> list:
+        apps = []
+        known_exes = set()
+        dirs = [
+            os.path.expandvars(r"%PROGRAMDATA%\Microsoft\Windows\Start Menu\Programs"),
+            os.path.expandvars(r"%APPDATA%\Microsoft\Windows\Start Menu\Programs"),
+            os.path.expandvars(r"%LOCALAPPDATA%\Programs")
+        ]
+        try:
+            for base_dir in dirs:
+                if not os.path.exists(base_dir):
+                    continue
+                for root, _, files in os.walk(base_dir):
+                    for fname in files:
+                        f_lower = fname.lower()
+                        if f_lower.endswith(".lnk"):
+                            name = os.path.splitext(fname)[0]
+                            if name.lower() not in known_exes:
+                                known_exes.add(name.lower())
+                                apps.append({"name": name, "path": os.path.join(root, fname), "icon": "📱"})
+                        elif f_lower.endswith(".exe"):
+                            name = os.path.splitext(fname)[0].capitalize()
+                            if name.lower() not in known_exes:
+                                known_exes.add(name.lower())
+                                apps.append({"name": name, "path": os.path.join(root, fname), "icon": "📱"})
+        except Exception:
+            pass
+        return apps
+
     @staticmethod
     def purge_system_ram() -> bool:
         """Purges memory working sets using Win32 EmptyWorkingSet C-API."""
@@ -213,9 +355,9 @@ class SystemMonitor:
         if not HAS_PYCAW:
             return False
         try:
-            vol_iface = _get_pycaw_volume_interface()
-            if vol_iface:
-                return bool(vol_iface.GetMute())
+            mic_iface = _get_pycaw_mic_interface()
+            if mic_iface:
+                return bool(mic_iface.GetMute())
             return False
         except Exception:
             return False
@@ -225,25 +367,34 @@ class SystemMonitor:
         if not HAS_PYCAW:
             return
         try:
-            vol_iface = _get_pycaw_volume_interface()
-            if vol_iface:
-                vol_iface.SetMute(bool(muted), None)
+            mic_iface = _get_pycaw_mic_interface()
+            if mic_iface:
+                mic_iface.SetMute(bool(muted), None)
         except Exception as e:
             print(f"Set mic mute exception: {e}")
 
     @staticmethod
     def get_master_mute() -> bool:
+        global _LAST_KNOWN_MUTE, _LAST_MUTE_SET_TIME
+        now = time.time()
+        # If user explicitly changed mute within 2.0s, maintain state immediately
+        if (now - _LAST_MUTE_SET_TIME) < 2.0:
+            return _LAST_KNOWN_MUTE
         try:
             vol_iface = _get_pycaw_volume_interface()
             if vol_iface:
-                return bool(vol_iface.GetMute())
-            return False
+                val = bool(vol_iface.GetMute())
+                _LAST_KNOWN_MUTE = val
+                return val
+            return _LAST_KNOWN_MUTE
         except Exception as e:
-            print(f"[Sound Control Error]: get_master_mute failed: {e}")
-            return False
+            return _LAST_KNOWN_MUTE
 
     @staticmethod
     def set_master_mute(muted: bool):
+        global _LAST_KNOWN_MUTE, _LAST_MUTE_SET_TIME
+        _LAST_KNOWN_MUTE = bool(muted)
+        _LAST_MUTE_SET_TIME = time.time()
         try:
             vol_iface = _get_pycaw_volume_interface()
             if vol_iface:
@@ -253,20 +404,26 @@ class SystemMonitor:
                 print("[Sound Control Error]: Pycaw volume interface unavailable for master mute.")
         except Exception as e:
             print(f"[Sound Control Exception]: set_master_mute({muted}) failed: {e}")
+            if hasattr(_AUDIO_TLS, 'vol_iface'):
+                _AUDIO_TLS.vol_iface = None
 
     @staticmethod
     def get_master_volume() -> int:
+        global _LAST_KNOWN_VOLUME
         try:
             vol_iface = _get_pycaw_volume_interface()
             if vol_iface:
-                return int(round(vol_iface.GetMasterVolumeLevelScalar() * 100))
-            return 50
+                val = int(round(vol_iface.GetMasterVolumeLevelScalar() * 100))
+                _LAST_KNOWN_VOLUME = val
+                return val
+            return _LAST_KNOWN_VOLUME
         except Exception as e:
-            print(f"[Sound Telemetry Error]: get_master_volume exception: {e}")
-            return 50
+            return _LAST_KNOWN_VOLUME
 
     @staticmethod
     def set_master_volume(level: int):
+        global _LAST_KNOWN_VOLUME
+        _LAST_KNOWN_VOLUME = int(level)
         try:
             vol_iface = _get_pycaw_volume_interface()
             if vol_iface:
@@ -277,6 +434,8 @@ class SystemMonitor:
                 print("[Sound Control Error]: Pycaw volume interface unavailable for master volume.")
         except Exception as e:
             print(f"[Sound Control Exception]: set_master_volume({level}%) failed: {e}")
+            if hasattr(_AUDIO_TLS, 'vol_iface'):
+                _AUDIO_TLS.vol_iface = None
 
     @staticmethod
     def play_alarm_sound_effect(sound_path: str = None):

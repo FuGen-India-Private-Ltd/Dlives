@@ -12,7 +12,7 @@ from PyQt6.QtWidgets import (
 )
 
 APP_NAME = "Dlives"
-APP_VERSION = "1.0.0"
+APP_VERSION = "1.0.0.1"
 DEFAULT_INSTALL_DIR = os.path.join(os.environ.get("LOCALAPPDATA", os.path.expanduser("~")), "Programs", "Dlives")
 
 def get_bundle_dir():

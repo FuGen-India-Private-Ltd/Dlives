@@ -1,8 +1,8 @@
-; Inno Setup Script for Dlives v1.0.0
+; Inno Setup Script for Dlives v1.0.0.1
 ; Designed for per-user installation (%LocalAppData%\Programs\Dlives\) without requiring UAC admin rights.
 
 #define MyAppName "Dlives"
-#define MyAppVersion "1.0.0"
+#define MyAppVersion "1.0.0.1"
 #define MyAppPublisher "Fugentech"
 #define MyAppExeName "Dlives.exe"
 
@@ -13,7 +13,7 @@ AppVersion={#MyAppVersion}
 AppPublisher={#MyAppPublisher}
 DefaultDirName={localappdata}\Programs\Dlives
 DefaultGroupName={#MyAppName}
-OutputBaseFilename=Dlives_Setup_v1.0.0
+OutputBaseFilename=Dlives_Setup_v1.0.0.1
 OutputDir=installer_dist
 Compression=lzma2/ultra64
 SolidCompression=yes

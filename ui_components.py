@@ -1807,16 +1807,18 @@ class CollapsedPillWidget(QWidget):
         self.show_pill_toast(text=text, duration_ms=duration_ms)
 
     def update_volume_and_mute(self, volume: int, is_muted: bool):
-        self.is_muted = bool(is_muted) or (volume <= 0)
-        self.mute_btn.setText("🔇" if self.is_muted else "🔊")
-        self.mute_btn.setToolTip(f"Muted ({volume}%) • Click to Unmute" if self.is_muted else f"Volume: {volume}% • Click to Mute")
+        target_muted = bool(is_muted) or (volume <= 0)
+        if getattr(self, 'is_muted', None) != target_muted:
+            self.is_muted = target_muted
+            self.mute_btn.setText("🔇" if target_muted else "🔊")
+        self.mute_btn.setToolTip(f"Muted ({volume}%) • Click to Unmute" if target_muted else f"Volume: {volume}% • Click to Mute")
 
     def toggle_mute(self):
-        new_mute = not self.is_muted
+        new_mute = not getattr(self, 'is_muted', False)
         self.is_muted = new_mute
-        SystemMonitor.set_master_mute(new_mute)
         self.mute_btn.setText("🔇" if new_mute else "🔊")
         self.mute_btn.setToolTip("Click to Unmute" if new_mute else "Click to Mute")
+        SystemMonitor.set_master_mute(new_mute)
 
     def mouseDoubleClickEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
@@ -2633,10 +2635,10 @@ class PomodoroFocusWidget(GlassPanel):
 class HomeLandingTabWidget(QWidget):
     pomo_tick_relayed = pyqtSignal(str, bool)
 
-    def __init__(self, storage: StorageManager, settings: SettingsManager, parent=None):
+    def __init__(self, storage: StorageManager = None, settings: SettingsManager = None, parent=None):
         super().__init__(parent)
-        self.storage = storage
-        self.settings = settings
+        self.storage = storage or StorageManager()
+        self.settings = settings or SettingsManager()
         self.home_notes_edits = {}  # filename -> QTextEdit
         self.init_ui()
 
@@ -2684,11 +2686,12 @@ class HomeLandingTabWidget(QWidget):
 
         self.scroll = QScrollArea()
         self.scroll.setWidgetResizable(True)
-        self.scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.scroll.setStyleSheet(f"QScrollArea, QScrollArea > QWidget > QWidget {{ border: none; background: transparent; }} {get_scrollbar_qss(accent, mode)}")
         if self.scroll.viewport():
             self.scroll.viewport().setStyleSheet("background: transparent;")
+        self.home_scroll_filter = SmoothScrollFilter(self.scroll, step_size=36, duration=180)
 
         self.content_widget = QWidget()
         self.content_widget.setStyleSheet("background: transparent;")
@@ -2703,7 +2706,7 @@ class HomeLandingTabWidget(QWidget):
 
     def apply_theme(self, accent_color: str, mode: str = "dark"):
         print(f"[SIGNAL] HomeLandingTabWidget RECEIVED apply_theme: mode={mode}, accent={accent_color}", flush=True)
-        self.scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.scroll.setStyleSheet(f"QScrollArea, QScrollArea > QWidget > QWidget {{ border: none; background: transparent; }} {get_scrollbar_qss(accent_color, mode)}")
         if self.scroll.viewport():
@@ -3513,9 +3516,9 @@ class NowPlayingWidget(GlassPanel):
 
 # 2. CONTROL CENTER TAB WIDGET
 class ControlCenterTabWidget(QWidget):
-    def __init__(self, settings: SettingsManager, parent=None):
+    def __init__(self, settings: SettingsManager = None, parent=None):
         super().__init__(parent)
-        self.settings = settings
+        self.settings = settings or SettingsManager()
         self.init_ui()
 
     def init_ui(self):
@@ -3661,9 +3664,9 @@ class ControlCenterTabWidget(QWidget):
 
 # 3. HARDWARE DIAGNOSTICS TAB WIDGET (WITH RAM PROGRESS BAR & TEMP CLEANUP BUTTON)
 class HardwareDiagnosticsTabWidget(QWidget):
-    def __init__(self, settings: SettingsManager, parent=None):
+    def __init__(self, settings: SettingsManager = None, parent=None):
         super().__init__(parent)
-        self.settings = settings
+        self.settings = settings or SettingsManager()
         self.init_ui()
 
     def init_ui(self):
@@ -3933,10 +3936,10 @@ def safe_clear_list_widget(list_widget: QListWidget):
 
 # 4. CLIPBOARD & FILE SHELF MERGED TAB WIDGET (WITH PROPER EMPTY STATE SIZING FIX - Req 2)
 class ClipboardShelfTabWidget(QWidget):
-    def __init__(self, storage: StorageManager, settings: SettingsManager = None, parent=None):
+    def __init__(self, storage: StorageManager = None, settings: SettingsManager = None, parent=None):
         super().__init__(parent)
-        self.storage = storage
-        self.settings = settings
+        self.storage = storage or StorageManager()
+        self.settings = settings or SettingsManager()
         self.setAcceptDrops(True)
         self.init_ui()
 
@@ -4358,10 +4361,10 @@ class DayCellWidget(QWidget):
 
 
 class CalendarTabWidget(QWidget):
-    def __init__(self, storage: StorageManager, settings: SettingsManager, parent=None):
+    def __init__(self, storage: StorageManager = None, settings: SettingsManager = None, parent=None):
         super().__init__(parent)
-        self.storage = storage
-        self.settings = settings
+        self.storage = storage or StorageManager()
+        self.settings = settings or SettingsManager()
         self.selected_date = QDate.currentDate()
         self.current_view_date = QDate.currentDate()
         self.init_ui()
@@ -4774,10 +4777,10 @@ class SoundSelectorWidget(QWidget):
 
 # 6. ALARMS & TIMETABLE MERGED TAB WIDGET
 class AlarmsTabWidget(QWidget):
-    def __init__(self, storage: StorageManager, settings: SettingsManager, parent=None):
+    def __init__(self, storage: StorageManager = None, settings: SettingsManager = None, parent=None):
         super().__init__(parent)
-        self.storage = storage
-        self.settings = settings
+        self.storage = storage or StorageManager()
+        self.settings = settings or SettingsManager()
         self.editing_alarm_id = None
         self.init_ui()
 
@@ -5268,8 +5271,9 @@ class StartMenuScanThread(QThread):
         apps = []
         known_exes = set()
         dirs = [
-            os.path.join(os.environ.get("ProgramData", "C:\\ProgramData"), r"Microsoft\Windows\Start Menu\Programs"),
-            os.path.join(os.environ.get("AppData", "C:\\Users\\Default\\AppData\\Roaming"), r"Microsoft\Windows\Start Menu\Programs")
+            os.path.expandvars(r"%PROGRAMDATA%\Microsoft\Windows\Start Menu\Programs"),
+            os.path.expandvars(r"%APPDATA%\Microsoft\Windows\Start Menu\Programs"),
+            os.path.expandvars(r"%LOCALAPPDATA%\Programs")
         ]
 
         try:
@@ -5287,17 +5291,18 @@ class StartMenuScanThread(QThread):
                     continue
                 for root, _, files in os.walk(base_dir):
                     for fname in files:
-                        if fname.lower().endswith(".lnk"):
+                        f_lower = fname.lower()
+                        if f_lower.endswith(".lnk"):
                             lnk_path = os.path.join(root, fname)
                             try:
                                 shortcut = shell.CreateShortCut(lnk_path)
                                 target = shortcut.TargetPath
                                 if target and target.lower().endswith(".exe") and os.path.exists(target):
-                                    target_lower = target.lower()
-                                    if "uninstall" in target_lower or "unins000" in target_lower or "setup" in target_lower:
+                                    t_low = target.lower()
+                                    if any(k in t_low for k in ["uninstall", "unins000", "setup", "update.exe", "helper", "crashreporter", "vcredist", "dxsetup", "node_modules", "elevate"]):
                                         continue
-                                    if target_lower not in known_exes:
-                                        known_exes.add(target_lower)
+                                    if t_low not in known_exes:
+                                        known_exes.add(t_low)
                                         name = os.path.splitext(fname)[0]
                                         apps.append({
                                             "name": name,
@@ -5306,6 +5311,52 @@ class StartMenuScanThread(QThread):
                                         })
                             except Exception:
                                 pass
+                        elif f_lower.endswith(".exe") and base_dir == os.path.expandvars(r"%LOCALAPPDATA%\Programs"):
+                            exe_path = os.path.join(root, fname)
+                            t_low = exe_path.lower()
+                            if any(k in t_low for k in ["uninstall", "unins000", "setup", "update.exe", "helper", "crashreporter", "node_modules", "elevate"]):
+                                continue
+                            if t_low not in known_exes and os.path.exists(exe_path):
+                                known_exes.add(t_low)
+                                name = os.path.splitext(fname)[0].replace("_", " ").capitalize()
+                                apps.append({
+                                    "name": name,
+                                    "path": exe_path,
+                                    "icon": "📱"
+                                })
+
+            # Registry App Paths Scanner
+            try:
+                import winreg
+                reg_roots = [
+                    (winreg.HKEY_CURRENT_USER, r"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths"),
+                    (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths")
+                ]
+                for hkey, subkey in reg_roots:
+                    try:
+                        with winreg.OpenKey(hkey, subkey) as key:
+                            num_subkeys = winreg.QueryInfoKey(key)[0]
+                            for i in range(num_subkeys):
+                                try:
+                                    app_name = winreg.EnumKey(key, i)
+                                    with winreg.OpenKey(key, app_name) as app_key:
+                                        exe_path, _ = winreg.QueryValueEx(app_key, "")
+                                        if exe_path:
+                                            exe_path = exe_path.strip().strip('"')
+                                            if exe_path.lower().endswith(".exe") and os.path.exists(exe_path):
+                                                t_low = exe_path.lower()
+                                                if any(k in t_low for k in ["uninstall", "unins000", "setup", "update.exe", "helper", "crashreporter", "node_modules", "elevate"]):
+                                                    continue
+                                                if t_low not in known_exes:
+                                                    known_exes.add(t_low)
+                                                    clean_name = os.path.splitext(app_name)[0].replace("_", " ").replace("-", " ").capitalize()
+                                                    apps.append({"name": clean_name, "path": exe_path, "icon": "📱"})
+                                except Exception:
+                                    pass
+                    except Exception:
+                        pass
+            except Exception:
+                pass
         except Exception as e:
             print(f"Start Menu Scan Thread Exception: {e}")
 
@@ -5802,10 +5853,10 @@ class AppShortcutCard(GlassPanel):
 
 
 class AppLauncherTabWidget(QWidget):
-    def __init__(self, storage: StorageManager, settings: SettingsManager = None, parent=None):
+    def __init__(self, storage: StorageManager = None, settings: SettingsManager = None, parent=None):
         super().__init__(parent)
-        self.storage = storage
-        self.settings = settings
+        self.storage = storage or StorageManager()
+        self.settings = settings or SettingsManager()
         self.init_ui()
 
     def init_ui(self):
@@ -5915,16 +5966,6 @@ class AppLauncherTabWidget(QWidget):
                 os.startfile(cmd)
                 return
 
-            # If command starts with 'start ', extract target
-            if cmd.lower().startswith("start "):
-                target = cmd[6:].strip().strip('"')
-                if os.path.exists(target):
-                    os.startfile(target)
-                    return
-                elif target.lower() in ("msedge", "chrome", "firefox", "calc", "notepad", "explorer"):
-                    os.system(f"start {target}")
-                    return
-
             # Check if resolved executable exists
             if hasattr(self, 'storage') and self.storage:
                 resolved = self.storage.resolve_exe_path(cmd)
@@ -5932,10 +5973,26 @@ class AppLauncherTabWidget(QWidget):
                     os.startfile(resolved)
                     return
 
+            # If command starts with 'start ', extract target
+            if cmd.lower().startswith("start "):
+                target = cmd[6:].strip().strip('"')
+                if os.path.exists(target):
+                    os.startfile(target)
+                    return
+                elif hasattr(self, 'storage') and self.storage:
+                    resolved_target = self.storage.resolve_exe_path(target)
+                    if resolved_target and os.path.exists(resolved_target):
+                        os.startfile(resolved_target)
+                        return
+                flags = 0x08000000 if os.name == 'nt' else 0
+                subprocess.Popen(["cmd", "/c", "start", "", target], creationflags=flags)
+                return
+
             import shlex
-            parts = shlex.split(cmd)
+            parts = shlex.split(cmd, posix=False)
             if parts:
-                subprocess.Popen(parts, shell=False)
+                flags = 0x08000000 if os.name == 'nt' else 0
+                subprocess.Popen(parts, shell=False, creationflags=flags)
         except Exception as e:
             print(f"Failed to launch app ({command}): {e}")
 
@@ -5952,10 +6009,10 @@ class AppLauncherTabWidget(QWidget):
 
 # 8. MULTI-NOTE MANAGER TAB WIDGET (WITH USER-SELECTABLE HOME PINNING TOGGLE - Req 1)
 class QuickNotesTabWidget(QWidget):
-    def __init__(self, storage: StorageManager, settings: SettingsManager = None, parent=None):
+    def __init__(self, storage: StorageManager = None, settings: SettingsManager = None, parent=None):
         super().__init__(parent)
-        self.storage = storage
-        self.settings = settings
+        self.storage = storage or StorageManager()
+        self.settings = settings or SettingsManager()
         self.current_note_id = None
         self.auto_save_timer = QTimer(self)
         self.auto_save_timer.setSingleShot(True)
@@ -6219,9 +6276,9 @@ class QuickNotesTabWidget(QWidget):
 class SettingsTabWidget(QWidget):
     open_full_window_requested = pyqtSignal()
 
-    def __init__(self, settings: SettingsManager, parent=None):
+    def __init__(self, settings: SettingsManager = None, parent=None):
         super().__init__(parent)
-        self.settings = settings
+        self.settings = settings or SettingsManager()
         self.current_accent_identity = self.settings.get("accent_identity", "sky_blue")
         self.form_labels = []
 
@@ -6694,7 +6751,7 @@ class NotificationsTabWidget(QWidget):
 
     def __init__(self, settings: SettingsManager = None, parent=None):
         super().__init__(parent)
-        self.settings = settings
+        self.settings = settings or SettingsManager()
         self.item_checkboxes = {}
         self.cleared_notification_ids = set()
         self.init_ui()
@@ -6899,3 +6956,7 @@ class NotificationsTabWidget(QWidget):
         self.clear_all_btn.setStyleSheet(f"QPushButton {{ background-color: {pal['input_bg']}; color: {pal['text_primary']}; border: 1px solid {pal['input_border']}; border-radius: 4px; font-size: 9px; font-weight: bold; padding: 0 6px; }} QPushButton:hover {{ border: 1px solid {accent_color}; }}")
         self.refresh_btn.setStyleSheet(f"QPushButton {{ background-color: {pal['input_bg']}; color: {pal['text_primary']}; border: 1px solid {pal['input_border']}; border-radius: 4px; font-size: 9px; font-weight: bold; padding: 0 6px; }} QPushButton:hover {{ border: 1px solid {accent_color}; }}")
         self.notif_list.setStyleSheet(get_list_widget_qss(accent_color, mode))
+
+# Backward Compatibility Aliases
+TodoListTabWidget = HomeLandingTabWidget
+TasksTabWidget = HomeLandingTabWidget

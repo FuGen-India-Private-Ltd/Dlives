@@ -40,7 +40,7 @@ DEFAULT_SETTINGS = {
     "sync_windows_theme": False,
     "suppress_popups_in_fullscreen": True,
     "notification_popup_enabled": True,
-    "popup_notification_apps": ["WhatsApp", "Slack", "Microsoft Teams", "Discord", "Telegram", "Mail", "Outlook", "Chrome", "Edge"],
+    "popup_notification_apps": [],
     "notification_popup_autodismiss_seconds": 3,
     "enable_system_pill_toasts": True,
     "show_home_pomodoro": True,
@@ -98,6 +98,11 @@ class SettingsManager(QObject):
         # Position safety check
         if settings.get("position") not in ("top_center", "top_left", "top_right", "bottom_center"):
             settings["position"] = "top_center"
+
+        # Sanitize legacy hardcoded notification priority apps
+        legacy_apps = ["WhatsApp", "Slack", "Microsoft Teams", "Discord", "Telegram", "Mail", "Outlook", "Chrome", "Edge"]
+        if settings.get("popup_notification_apps") == legacy_apps:
+            settings["popup_notification_apps"] = []
 
         # Defensive type & range validation
         try:
@@ -172,20 +177,78 @@ class SettingsManager(QObject):
             return default
         return DEFAULT_SETTINGS.get(key)
 
+    def _validate_setting(self, key, value):
+        if key == "bg_opacity":
+            try:
+                return max(0.85, min(1.0, float(value)))
+            except (ValueError, TypeError):
+                return 0.90
+        elif key in ("offset_y", "offset_x"):
+            try:
+                return int(value)
+            except (ValueError, TypeError):
+                return 12 if key == "offset_y" else 0
+        elif key == "monitor_index":
+            try:
+                return max(0, int(value))
+            except (ValueError, TypeError):
+                return 0
+        elif key == "corner_radius":
+            try:
+                return max(8, min(30, int(value)))
+            except (ValueError, TypeError):
+                return 20
+        elif key == "alarm_autodismiss_seconds":
+            try:
+                return max(5, min(300, int(value)))
+            except (ValueError, TypeError):
+                return 30
+        elif key == "hover_delay_ms":
+            try:
+                return max(50, min(1000, int(value)))
+            except (ValueError, TypeError):
+                return 300
+        elif key == "position":
+            valid_positions = {
+                "top_center": "top_center",
+                "top-center": "top-center",
+                "top_left": "top_left",
+                "top-left": "top-left",
+                "top_right": "top_right",
+                "top-right": "top-right",
+                "bottom_center": "bottom_center",
+                "bottom-center": "bottom-center",
+                "bottom_left": "bottom_left",
+                "bottom-left": "bottom-left",
+                "bottom_right": "bottom_right",
+                "bottom-right": "bottom-right"
+            }
+            return valid_positions.get(str(value).lower(), "top-center")
+        return value
+
     def set(self, key, value):
-        if self.settings.get(key) == value:
+        validated = self._validate_setting(key, value)
+        if self.settings.get(key) == validated:
             return
-        self.settings[key] = value
+        self.settings[key] = validated
         self.save_settings()
 
     def update_settings(self, new_settings: dict):
         changed = False
         for k, v in new_settings.items():
-            if self.settings.get(k) != v:
-                self.settings[k] = v
+            validated = self._validate_setting(k, v)
+            if self.settings.get(k) != validated:
+                self.settings[k] = validated
                 changed = True
         if changed:
             self.save_settings()
+
+    def set_start_with_windows(self, enable: bool):
+        self.update_settings({"start_with_windows": bool(enable)})
+
+    def reset_defaults(self):
+        self.settings = DEFAULT_SETTINGS.copy()
+        self.save_settings()
 
     def sync_registry_startup(self):
         """Syncs application startup preference with Windows Registry using context managers."""
