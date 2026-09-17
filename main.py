@@ -2605,6 +2605,17 @@ def main():
     app.aboutToQuit.connect(island.storage.flush_dirty_notes)
     app.aboutToQuit.connect(island.settings.flush_save)
     clip_monitor = ScreenshotAndClipboardMonitor(island.storage, island.pill_widget, island)
+    
+    if island.settings.get("is_first_run", True):
+        island.settings.set("is_first_run", False)
+        from PyQt6.QtWidgets import QMessageBox
+        msg = QMessageBox()
+        msg.setWindowTitle("Welcome to Dlives!")
+        msg.setText("Dlives is now running silently in the background.\n\nTo reveal your Dynamic Island:\n1. Move your mouse cursor to the top-center edge of your screen.\n2. Or toggle your Caps Lock / Num Lock keys.\n3. Or click the Dlives icon in your Windows System Tray.\n\nYou can also click the ⚙️ Settings tab in the island to customize the position, size, and colors.")
+        msg.setIcon(QMessageBox.Icon.Information)
+        msg.setWindowFlags(msg.windowFlags() | Qt.WindowType.WindowStaysOnTopHint)
+        msg.exec()
+
     sys.exit(app.exec())
 
 

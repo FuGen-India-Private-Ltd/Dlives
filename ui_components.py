@@ -6344,6 +6344,31 @@ class SettingsTabWidget(QWidget):
         fc_layout.addWidget(self.btn_launch_full)
         form_layout.addWidget(self.full_card)
 
+        # Support & Feedback Card
+        self.support_card = GlassPanel(category_key="settings", corner_radius=8)
+        sc_layout = QHBoxLayout(self.support_card)
+        sc_layout.setContentsMargins(10, 8, 10, 8)
+        sc_layout.setSpacing(8)
+
+        sc_info = QVBoxLayout()
+        sc_info.setSpacing(2)
+        self.lbl_sc_title = QLabel("💬 REPORT BUG / FEEDBACK")
+        self.lbl_sc_title.setStyleSheet(f"color: {accent}; font-size: 11px; font-weight: 800; background: transparent;")
+        self.lbl_sc_desc = QLabel("Help us improve Dlives! Send bugs or requests directly.")
+        self.lbl_sc_desc.setStyleSheet(f"color: {pal['text_secondary']}; font-size: 9.5px; font-weight: 500; background: transparent;")
+        sc_info.addWidget(self.lbl_sc_title)
+        sc_info.addWidget(self.lbl_sc_desc)
+
+        self.btn_support = QPushButton("Email Us ✉️")
+        self.btn_support.setFixedHeight(26)
+        self.btn_support.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_support.setStyleSheet(f"QPushButton {{ background-color: {accent}; color: #ffffff; border: none; border-radius: 5px; font-size: 10.5px; font-weight: bold; padding: 0 12px; }} QPushButton:hover {{ opacity: 0.85; }}")
+        self.btn_support.clicked.connect(self.trigger_support_email)
+
+        sc_layout.addLayout(sc_info, 1)
+        sc_layout.addWidget(self.btn_support)
+        form_layout.addWidget(self.support_card)
+
         form = QFormLayout()
         form.setVerticalSpacing(12)
         form.setHorizontalSpacing(14)
@@ -6728,6 +6753,15 @@ class SettingsTabWidget(QWidget):
             self.chk_allow_tt.setChecked(settings_dict.get("pomodoro_allow_timetable", True))
         if hasattr(self, 'chk_allow_alarms'):
             self.chk_allow_alarms.setChecked(settings_dict.get("pomodoro_allow_alarms", True))
+
+    def trigger_support_email(self):
+        import webbrowser
+        import platform
+        import urllib.parse
+        os_info = platform.system() + " " + platform.release()
+        subject = urllib.parse.quote("Dlives App Feedback / Bug Report")
+        body = urllib.parse.quote(f"Hi Dlives team,\n\nI want to report a bug or suggest a feature:\n\n[Type your message here]\n\n---\nSystem Info: {os_info}")
+        webbrowser.open(f"mailto:suhashoskere@gmail.com?subject={subject}&body={body}")
 
     def trigger_open_full_window(self):
         self.open_full_window_requested.emit()

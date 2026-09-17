@@ -180,3 +180,92 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 });
+
+
+  // --- 6. Carousel Logic ---
+  const track = document.getElementById('carousel-track');
+  const prevBtn = document.getElementById('carousel-prev');
+  const nextBtn = document.getElementById('carousel-next');
+  
+  if (track && prevBtn && nextBtn) {
+    const slides = Array.from(track.children);
+    let currentIndex = 0;
+    
+    function updateCarousel() {
+      const slideWidth = slides[0].getBoundingClientRect().width;
+      track.style.transform = 'translateX(-' + (slideWidth * currentIndex) + 'px)';
+    }
+    
+    nextBtn.addEventListener('click', () => {
+      currentIndex = (currentIndex + 1) % slides.length;
+      updateCarousel();
+    });
+    
+    prevBtn.addEventListener('click', () => {
+      currentIndex = (currentIndex - 1 + slides.length) % slides.length;
+      updateCarousel();
+    });
+    
+    window.addEventListener('resize', updateCarousel);
+  }
+
+
+  // --- 6.5. Carousel Keyboard & Autoplay ---
+  if (track && prevBtn && nextBtn) {
+    let autoplayInterval = setInterval(() => {
+        nextBtn.click();
+    }, 5000);
+    
+    document.querySelector('.carousel-container').addEventListener('mouseenter', () => {
+        clearInterval(autoplayInterval);
+    });
+    
+    document.querySelector('.carousel-container').addEventListener('mouseleave', () => {
+        autoplayInterval = setInterval(() => {
+            nextBtn.click();
+        }, 5000);
+    });
+
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'ArrowRight') nextBtn.click();
+        if (e.key === 'ArrowLeft') prevBtn.click();
+    });
+  }
+
+
+  // --- 7. Global Scroll Reveal Animations ---
+  const revealElements = document.querySelectorAll('.section, .glass-card, .hero-left-col, .hero-preview-col, .docs-content h2, .docs-content h3');
+  
+  if (revealElements.length > 0) {
+    revealElements.forEach(el => el.classList.add('reveal-hidden'));
+    
+    const revealObserver = new IntersectionObserver((entries, observer) => {
+      entries.forEach(entry => {
+        if (entry.isIntersecting) {
+          entry.target.classList.add('reveal-visible');
+          observer.unobserve(entry.target);
+        }
+      });
+    }, {
+      root: null,
+      threshold: 0.1,
+      rootMargin: "0px 0px -50px 0px"
+    });
+    
+    revealElements.forEach(el => revealObserver.observe(el));
+  }
+
+  // --- 8. Dynamic Reading Progress Bar ---
+  const progressBar = document.createElement('div');
+  progressBar.id = 'reading-progress';
+  document.body.prepend(progressBar);
+  
+  window.addEventListener('scroll', () => {
+    const scrollTotal = document.documentElement.scrollTop;
+    const heightTotal = document.documentElement.scrollHeight - document.documentElement.clientHeight;
+    
+    if (heightTotal > 0) {
+        const scrollRatio = (scrollTotal / heightTotal) * 100;
+        progressBar.style.width = scrollRatio + '%';
+    }
+  });

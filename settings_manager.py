@@ -53,7 +53,8 @@ DEFAULT_SETTINGS = {
     "watermark_opacity": 0.04,
     "auto_delete_daily_notifications": True,
     "visible_tabs": ["home", "control", "hardware", "shelf_clip", "calendar", "alarms", "apps", "notes", "settings", "notifs"],
-    "tab_order": ["home", "control", "hardware", "shelf_clip", "calendar", "alarms", "apps", "notes", "settings", "notifs"]
+    "tab_order": ["home", "control", "hardware", "shelf_clip", "calendar", "alarms", "apps", "notes", "settings", "notifs"],
+    "is_first_run": True
 }
 
 REG_PATH = r"Software\Microsoft\Windows\CurrentVersion\Run"
