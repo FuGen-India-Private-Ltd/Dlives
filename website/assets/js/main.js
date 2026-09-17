@@ -180,3 +180,54 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 });
+
+
+  // --- 6. Carousel Logic ---
+  const track = document.getElementById('carousel-track');
+  const prevBtn = document.getElementById('carousel-prev');
+  const nextBtn = document.getElementById('carousel-next');
+  
+  if (track && prevBtn && nextBtn) {
+    const slides = Array.from(track.children);
+    let currentIndex = 0;
+    
+    function updateCarousel() {
+      const slideWidth = slides[0].getBoundingClientRect().width;
+      track.style.transform = 'translateX(-' + (slideWidth * currentIndex) + 'px)';
+    }
+    
+    nextBtn.addEventListener('click', () => {
+      currentIndex = (currentIndex + 1) % slides.length;
+      updateCarousel();
+    });
+    
+    prevBtn.addEventListener('click', () => {
+      currentIndex = (currentIndex - 1 + slides.length) % slides.length;
+      updateCarousel();
+    });
+    
+    window.addEventListener('resize', updateCarousel);
+  }
+
+
+  // --- 6.5. Carousel Keyboard & Autoplay ---
+  if (track && prevBtn && nextBtn) {
+    let autoplayInterval = setInterval(() => {
+        nextBtn.click();
+    }, 5000);
+    
+    document.querySelector('.carousel-container').addEventListener('mouseenter', () => {
+        clearInterval(autoplayInterval);
+    });
+    
+    document.querySelector('.carousel-container').addEventListener('mouseleave', () => {
+        autoplayInterval = setInterval(() => {
+            nextBtn.click();
+        }, 5000);
+    });
+
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'ArrowRight') nextBtn.click();
+        if (e.key === 'ArrowLeft') prevBtn.click();
+    });
+  }
