@@ -231,3 +231,41 @@ document.addEventListener('DOMContentLoaded', () => {
         if (e.key === 'ArrowLeft') prevBtn.click();
     });
   }
+
+
+  // --- 7. Global Scroll Reveal Animations ---
+  const revealElements = document.querySelectorAll('.section, .glass-card, .hero-left-col, .hero-preview-col, .docs-content h2, .docs-content h3');
+  
+  if (revealElements.length > 0) {
+    revealElements.forEach(el => el.classList.add('reveal-hidden'));
+    
+    const revealObserver = new IntersectionObserver((entries, observer) => {
+      entries.forEach(entry => {
+        if (entry.isIntersecting) {
+          entry.target.classList.add('reveal-visible');
+          observer.unobserve(entry.target);
+        }
+      });
+    }, {
+      root: null,
+      threshold: 0.1,
+      rootMargin: "0px 0px -50px 0px"
+    });
+    
+    revealElements.forEach(el => revealObserver.observe(el));
+  }
+
+  // --- 8. Dynamic Reading Progress Bar ---
+  const progressBar = document.createElement('div');
+  progressBar.id = 'reading-progress';
+  document.body.prepend(progressBar);
+  
+  window.addEventListener('scroll', () => {
+    const scrollTotal = document.documentElement.scrollTop;
+    const heightTotal = document.documentElement.scrollHeight - document.documentElement.clientHeight;
+    
+    if (heightTotal > 0) {
+        const scrollRatio = (scrollTotal / heightTotal) * 100;
+        progressBar.style.width = scrollRatio + '%';
+    }
+  });
