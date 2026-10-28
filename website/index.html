@@ -278,31 +278,52 @@
           <p class="section-sub">Captured natively on Windows 11 in pure dark mode.</p>
         </div>
 
-        <div class="gallery-clean-grid">
-          <div class="gallery-item-clean glass-card" data-src="assets/screenshots/home-tab.png" data-title="Home Dashboard">
-            <img src="assets/screenshots/home-tab.png" alt="Home Dashboard" loading="lazy" />
-            <div class="gallery-item-title">Home Dashboard</div>
+        <!-- Arrow-based Image Carousel -->
+        <div class="carousel-container">
+          <button class="carousel-btn prev-btn" id="carousel-prev" aria-label="Previous image">❮</button>
+          
+          <div class="carousel-track-container">
+            <ul class="carousel-track" id="carousel-track">
+              <li class="carousel-slide current-slide">
+                <div class="gallery-item-clean glass-card" data-src="assets/screenshots/home-tab.png" data-title="Home Dashboard">
+                  <img src="assets/screenshots/home-tab.png" alt="Home Dashboard" loading="lazy" />
+                  <div class="gallery-item-title">Home Dashboard</div>
+                </div>
+              </li>
+              <li class="carousel-slide">
+                <div class="gallery-item-clean glass-card" data-src="assets/screenshots/control-media.png" data-title="Media Player">
+                  <img src="assets/screenshots/control-media.png" alt="Media Player" loading="lazy" />
+                  <div class="gallery-item-title">Media &amp; Tap-to-Seek</div>
+                </div>
+              </li>
+              <li class="carousel-slide">
+                <div class="gallery-item-clean glass-card" data-src="assets/screenshots/system-diagnostics.png" data-title="System Diagnostics">
+                  <img src="assets/screenshots/system-diagnostics.png" alt="System Diagnostics" loading="lazy" />
+                  <div class="gallery-item-title">System Telemetry</div>
+                </div>
+              </li>
+              <li class="carousel-slide">
+                <div class="gallery-item-clean glass-card" data-src="assets/screenshots/clipboard-shelf.png" data-title="Clipboard &amp; Shelf">
+                  <img src="assets/screenshots/clipboard-shelf.png" alt="Clipboard Shelf" loading="lazy" />
+                  <div class="gallery-item-title">Clipboard &amp; File Shelf</div>
+                </div>
+              </li>
+              <li class="carousel-slide">
+                <div class="gallery-item-clean glass-card" data-src="assets/screenshots/calendar.png" data-title="Calendar">
+                  <img src="assets/screenshots/calendar.png" alt="Calendar" loading="lazy" />
+                  <div class="gallery-item-title">Calendar &amp; Events</div>
+                </div>
+              </li>
+              <li class="carousel-slide">
+                <div class="gallery-item-clean glass-card" data-src="assets/screenshots/alarms.png" data-title="Alarms &amp; Schedule">
+                  <img src="assets/screenshots/alarms.png" alt="Alarms" loading="lazy" />
+                  <div class="gallery-item-title">Alarms &amp; Timetable</div>
+                </div>
+              </li>
+            </ul>
           </div>
-          <div class="gallery-item-clean glass-card" data-src="assets/screenshots/control-media.png" data-title="Media Player">
-            <img src="assets/screenshots/control-media.png" alt="Media Player" loading="lazy" />
-            <div class="gallery-item-title">Media &amp; Tap-to-Seek</div>
-          </div>
-          <div class="gallery-item-clean glass-card" data-src="assets/screenshots/system-diagnostics.png" data-title="System Diagnostics">
-            <img src="assets/screenshots/system-diagnostics.png" alt="System Diagnostics" loading="lazy" />
-            <div class="gallery-item-title">System Telemetry</div>
-          </div>
-          <div class="gallery-item-clean glass-card" data-src="assets/screenshots/clipboard-shelf.png" data-title="Clipboard &amp; Shelf">
-            <img src="assets/screenshots/clipboard-shelf.png" alt="Clipboard Shelf" loading="lazy" />
-            <div class="gallery-item-title">Clipboard &amp; File Shelf</div>
-          </div>
-          <div class="gallery-item-clean glass-card" data-src="assets/screenshots/calendar.png" data-title="Calendar">
-            <img src="assets/screenshots/calendar.png" alt="Calendar" loading="lazy" />
-            <div class="gallery-item-title">Calendar &amp; Events</div>
-          </div>
-          <div class="gallery-item-clean glass-card" data-src="assets/screenshots/alarms.png" data-title="Alarms &amp; Schedule">
-            <img src="assets/screenshots/alarms.png" alt="Alarms" loading="lazy" />
-            <div class="gallery-item-title">Alarms &amp; Timetable</div>
-          </div>
+          
+          <button class="carousel-btn next-btn" id="carousel-next" aria-label="Next image">❯</button>
         </div>
       </div>
     </section>
